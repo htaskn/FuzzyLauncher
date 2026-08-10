@@ -1,14 +1,15 @@
 ﻿<#
 .SYNOPSIS
-    IncrementalLauncher - インクリメンタルサーチ型のキーボードランチャー (PowerShell 5.1 版)
+    FuzzyLauncher - インクリメンタルファジー検索型のキーボードランチャー (PowerShell 5.1 版)
 
 .DESCRIPTION
     C# / WinForms 版 IncrementalLauncher の PowerShell 5.1 移植。
     トリガーキー（かな / 変換 / 無変換）でカーソル位置にランチャーを表示し、
-    コマンド名をインクリメンタルサーチして実行する。
+    コマンド名をインクリメンタル検索して実行する。
+    検索GUI自体は再利用可能な部品として UI\FuzzySearcher.psm1 に切り出されている。
 
     起動例:
-        powershell -STA -NoProfile -ExecutionPolicy Bypass -File .\IncrementalLauncher.ps1
+        powershell -STA -NoProfile -ExecutionPolicy Bypass -File .\FuzzyLauncher.ps1
 
 .PARAMETER ShowConsole
     起動時にコンソールウィンドウを隠さない（デバッグ用）。
@@ -17,21 +18,21 @@
     起動時からデバッグ用カラム（Score / Bingo など）を表示する。
 
 .NOTES
-    C#版アーキテクチャとの対応:
-        Program.cs                  -> このファイル
-        AppSettings.cs              -> Core\AppSettings.ps1
-        Core\CommandListParser.cs   -> Core\CommandListParser.ps1
-        Core\CommandManager.cs      -> Core\CommandManager.ps1
-        Core\BuiltinCommandExecutor -> Core\BuiltinCommandExecutor.ps1
-        Core\WindowManager.cs       -> Core\WindowManager.ps1
-        Core\KeyboardHook.cs        -> Core\Interop.ps1 (C#のまま。理由はファイル内コメント参照)
-        Utils\NativeMethods.cs      -> Core\Interop.ps1
-        UI\LauncherForm.cs          -> UI\LauncherForm.ps1
-        UI\AddCommandForm.cs        -> UI\AddCommandForm.ps1
-        TrayIconManager.cs          -> UI\TrayIconManager.ps1
-        Utils\StringHelper.cs       -> Utils\StringHelper.ps1
-        Utils\IconLoader.cs         -> Utils\IconLoader.ps1
-        Utils\ResourceInitializer   -> Utils\ResourceInitializer.ps1
+    ファイル構成:
+        FuzzyLauncher.ps1            -> エントリポイント / アプリ制御
+        Core\AppSettings.ps1         -> 設定管理
+        Core\CommandListParser.ps1   -> コマンドリストファイルのパース
+        Core\CommandManager.ps1      -> メニュー管理（検索ロジックは含まない）
+        Core\BuiltinCommandExecutor.ps1 -> & から始まる内製コマンドの実行
+        Core\WindowManager.ps1       -> ウィンドウ操作
+        Core\Interop.ps1             -> Win32 API / KeyboardHook / LauncherWindow (C#)
+        UI\FuzzySearcher.psm1        -> 汎用インクリメンタル・ファジー検索ポップアップ部品
+        UI\LauncherForm.ps1          -> FuzzySearcher を呼び出すアプリ側の薄いラッパー
+        UI\AddCommandForm.ps1        -> コマンド追加用GUIフォーム
+        UI\TrayIconManager.ps1       -> タスクトレイアイコン
+        Utils\StringHelper.ps1       -> 文字列操作のユーティリティ
+        Utils\IconLoader.ps1         -> アプリアイコンの読み込み
+        Utils\ResourceInitializer.ps1 -> commandsフォルダ/default.txtの初期化
 #>
 [CmdletBinding()]
 param(
@@ -82,6 +83,7 @@ $script:StartupCommand = '"{0}" -STA -NoProfile -ExecutionPolicy Bypass -WindowS
 . (Join-Path $PSScriptRoot 'Core\CommandManager.ps1')
 . (Join-Path $PSScriptRoot 'Core\WindowManager.ps1')
 . (Join-Path $PSScriptRoot 'Core\BuiltinCommandExecutor.ps1')
+Import-Module (Join-Path $PSScriptRoot 'UI\FuzzySearcher.psm1') -Force
 . (Join-Path $PSScriptRoot 'UI\LauncherForm.ps1')
 . (Join-Path $PSScriptRoot 'UI\AddCommandForm.ps1')
 . (Join-Path $PSScriptRoot 'UI\TrayIconManager.ps1')
@@ -95,8 +97,8 @@ $script:StartupCommand = '"{0}" -STA -NoProfile -ExecutionPolicy Bypass -WindowS
     アプリを終了する（C#版 Application.Exit 相当）。
 #>
 function Stop-LauncherApp {
-    [IncrementalLauncher.KeyboardHook]::IsActive = $false
-    [IncrementalLauncher.KeyboardHook]::Stop()
+    [FuzzyLauncher.KeyboardHook]::IsActive = $false
+    [FuzzyLauncher.KeyboardHook]::Stop()
     Remove-TrayIcon
     [System.Windows.Forms.Application]::Exit()
 }
@@ -107,8 +109,8 @@ function Stop-LauncherApp {
     PowerShell には Application.Restart がないため、自スクリプトを新しいプロセスで起動し直す。
 #>
 function Restart-LauncherApp {
-    [IncrementalLauncher.KeyboardHook]::IsActive = $false
-    [IncrementalLauncher.KeyboardHook]::Stop()
+    [FuzzyLauncher.KeyboardHook]::IsActive = $false
+    [FuzzyLauncher.KeyboardHook]::Stop()
     Remove-TrayIcon
     Clear-AppMutex
 
@@ -134,7 +136,7 @@ function Clear-AppMutex {
 
 # ---- 二重起動防止のためのミューテックス ----
 $createdNew = $false
-$script:AppMutex = New-Object System.Threading.Mutex($true, 'IncrementalLauncherMutex', [ref]$createdNew)
+$script:AppMutex = New-Object System.Threading.Mutex($true, 'FuzzyLauncherMutex', [ref]$createdNew)
 if (-not $createdNew) {
     $script:AppMutex.Dispose()
     $script:AppMutex = $null
@@ -144,13 +146,13 @@ if (-not $createdNew) {
 try {
     # ---- コンソールウィンドウを隠す ----
     if (-not $ShowConsole) {
-        [IncrementalLauncher.NativeMethods]::HideConsoleWindow()
+        [FuzzyLauncher.NativeMethods]::HideConsoleWindow()
     }
 
     # ---- Windows の UI スタイル / DPI 設定 ----
     # C#版の Application.SetHighDpiMode(SystemAware) は .NET Framework にないため
     # SetProcessDPIAware() を使う（= システム DPI 対応）
-    $null = [IncrementalLauncher.NativeMethods]::SetProcessDPIAware()
+    $null = [FuzzyLauncher.NativeMethods]::SetProcessDPIAware()
     [System.Windows.Forms.Application]::EnableVisualStyles()
     [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
 
@@ -164,21 +166,21 @@ try {
 
     # ---- キーボードフックの開始 ----
     # フックのコールバックは UI スレッドへマーシャリングされる（Interop.ps1 参照）
-    [IncrementalLauncher.KeyboardHook]::SetTarget($form)
-    [IncrementalLauncher.KeyboardHook]::TriggerHandler = [System.Action] {
+    [FuzzyLauncher.KeyboardHook]::SetTarget($form)
+    [FuzzyLauncher.KeyboardHook]::TriggerHandler = [System.Action] {
         try { Invoke-LauncherToggle } catch { Show-LauncherError -Message 'ランチャーの表示切替に失敗しました。' -ErrorRecord $_ }
     }
-    [IncrementalLauncher.KeyboardHook]::KeyDownHandler = [System.Action[int]] {
+    [FuzzyLauncher.KeyboardHook]::KeyDownHandler = [System.Action[int]] {
         param($vkCode)
         try { Invoke-LauncherKeyDown -VirtualKeyCode $vkCode } catch { Show-LauncherError -Message 'キー処理に失敗しました。' -ErrorRecord $_ }
     }
-    [IncrementalLauncher.KeyboardHook]::KeyPressHandler = [System.Action[char]] {
+    [FuzzyLauncher.KeyboardHook]::KeyPressHandler = [System.Action[char]] {
         param($char)
         try { Invoke-LauncherInputChar -Char $char } catch { Show-LauncherError -Message 'キー処理に失敗しました。' -ErrorRecord $_ }
     }
 
     try {
-        [IncrementalLauncher.KeyboardHook]::Start()
+        [FuzzyLauncher.KeyboardHook]::Start()
     }
     catch {
         Show-LauncherError -Message 'キーボードフックの開始に失敗しました。' -ErrorRecord $_
@@ -189,10 +191,8 @@ try {
 }
 finally {
     # ---- 後片付け ----
-    try { [IncrementalLauncher.KeyboardHook]::Stop() } catch { }
+    try { [FuzzyLauncher.KeyboardHook]::Stop() } catch { }
     try { Remove-TrayIcon } catch { }
-    if ($null -ne $script:UI -and $null -ne $script:UI.Form) {
-        try { $script:UI.Form.Dispose() } catch { }
-    }
+    try { (Get-FuzzySearcherForm).Dispose() } catch { }
     Clear-AppMutex
 }

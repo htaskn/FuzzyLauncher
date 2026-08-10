@@ -14,7 +14,7 @@
 # スタートアップ登録のレジストリキー
 $script:StartupRegKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
 # スタートアップ登録時のエントリ名
-$script:StartupEntryName = 'IncrementalLauncher'
+$script:StartupEntryName = 'FuzzyLauncher'
 
 # -----------------------------------------------------------------------------
 # コマンドハンドラの登録
@@ -76,7 +76,7 @@ $script:BuiltinHandlers = [ordered]@{
     # &Dialog <メッセージ> - メッセージダイアログを表示（デバッグ用）
     'Dialog '          = {
         param($CmdLine, $Arg)
-        $null = [System.Windows.Forms.MessageBox]::Show($Arg, 'IncrementalLauncher',
+        $null = [System.Windows.Forms.MessageBox]::Show($Arg, 'FuzzyLauncher',
             [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
         'SuccessClose'
     }
@@ -167,14 +167,14 @@ $script:BuiltinHandlers = [ordered]@{
     # &adjustActiveWindow - アクティブウィンドウがモニタからはみ出ている場合に調整する
     'adjustActiveWindow' = {
         param($CmdLine, $Arg)
-        Set-ActiveWindowInsideScreen -CurrentHandle $script:UI.Form.Handle
+        Set-ActiveWindowInsideScreen -CurrentHandle (Get-FuzzySearcherForm).Handle
         'SuccessClose'
     }
 
     # &toggleDebug - デバッグモードを切り替え
     'toggleDebug'      = {
         param($CmdLine, $Arg)
-        $script:UI.DebugMode = -not $script:UI.DebugMode
+        Set-FuzzySearcherDebugMode -Enabled (-not (Get-FuzzySearcherDebugMode))
         'SuccessClose'
     }
 
@@ -194,7 +194,7 @@ $script:BuiltinHandlers = [ordered]@{
 
         $null = [System.Windows.Forms.MessageBox]::Show(
             "スタートアップに登録しました。`n$($script:StartupEntryName) = $($script:StartupCommand)",
-            'IncrementalLauncher',
+            'FuzzyLauncher',
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Information)
         'SuccessClose'
@@ -216,7 +216,7 @@ $script:BuiltinHandlers = [ordered]@{
         }
         finally { $key.Close() }
 
-        $null = [System.Windows.Forms.MessageBox]::Show($message, 'IncrementalLauncher',
+        $null = [System.Windows.Forms.MessageBox]::Show($message, 'FuzzyLauncher',
             [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
         'SuccessClose'
     }

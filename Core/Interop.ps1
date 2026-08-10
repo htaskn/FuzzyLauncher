@@ -18,7 +18,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
 
-namespace IncrementalLauncher
+namespace FuzzyLauncher
 {
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT
@@ -356,6 +356,6 @@ namespace IncrementalLauncher
 '@
 
 # 同一プロセス内で二重定義しないようにガードする
-if (-not ('IncrementalLauncher.KeyboardHook' -as [type])) {
+if (-not ('FuzzyLauncher.KeyboardHook' -as [type])) {
     Add-Type -ReferencedAssemblies 'System.Windows.Forms', 'System.Drawing' -TypeDefinition $script:InteropSource
 }

@@ -33,7 +33,7 @@ function Show-AddCommandDialog {
 
     # ---- フォーム設定 ----
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = 'コマンド追加 - IncrementalLauncher'
+    $form.Text = 'コマンド追加 - FuzzyLauncher'
     $form.Size = New-Object System.Drawing.Size(520, 380)
     $form.MinimumSize = New-Object System.Drawing.Size(480, 400)
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen

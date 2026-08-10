@@ -11,7 +11,7 @@ $script:TrayIcon = $null
 #>
 function New-TrayIcon {
     $trayIcon = New-Object System.Windows.Forms.NotifyIcon
-    $trayIcon.Text = 'Incremental Launcher'
+    $trayIcon.Text = 'Fuzzy Launcher'
     $trayIcon.ContextMenuStrip = New-TrayContextMenu
     $trayIcon.Icon = Get-AppIcon
     $trayIcon.Visible = $true
@@ -63,10 +63,10 @@ function New-TrayContextMenu {
     # デバッグ表示切り替えメニュー
     $debugItem = New-Object System.Windows.Forms.ToolStripMenuItem('デバッグ用表示', $null, {
         param($eventSender, $e)
-        $script:UI.DebugMode = $eventSender.Checked
+        Set-FuzzySearcherDebugMode -Enabled $eventSender.Checked
     })
     $debugItem.CheckOnClick = $true
-    $debugItem.Checked = $script:UI.DebugMode
+    $debugItem.Checked = Get-FuzzySearcherDebugMode
     $null = $menu.Items.Add($debugItem)
 
     $null = $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))

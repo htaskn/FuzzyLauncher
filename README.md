@@ -1,4 +1,4 @@
-﻿# IncrementalLauncher (PowerShell 5.1 版)
+﻿# FuzzyLauncher (PowerShell 5.1 版)
 
 C# / WinForms 版 IncrementalLauncher を **PowerShell 5.1 (Windows PowerShell / .NET Framework 4.x)** へ移植したものです。
 ビルド不要で、`.ps1` を直接実行するだけで動作します。
@@ -8,7 +8,7 @@ C# / WinForms 版 IncrementalLauncher を **PowerShell 5.1 (Windows PowerShell /
 ## 起動方法
 
 ```powershell
-powershell -STA -NoProfile -ExecutionPolicy Bypass -File .\IncrementalLauncher.ps1
+powershell -STA -NoProfile -ExecutionPolicy Bypass -File .\FuzzyLauncher.ps1
 ```
 
 コンソールを一切出したくない場合は `起動.vbs` をダブルクリックしてください。
@@ -37,14 +37,15 @@ STA でない状態（`-MTA` や一部のホスト）で起動された場合は
 
 | ファイル | C#版の対応 |
 | --- | --- |
-| `IncrementalLauncher.ps1` | `Program.cs`（エントリポイント / アプリ制御） |
+| `FuzzyLauncher.ps1` | `Program.cs`（エントリポイント / アプリ制御） |
 | `Core\Interop.ps1` | `Core\KeyboardHook.cs`, `Utils\NativeMethods.cs`, `LauncherForm` の一部 |
 | `Core\AppSettings.ps1` | `AppSettings.cs` |
 | `Core\CommandListParser.ps1` | `Core\CommandListParser.cs`, `Models\CommandItem.cs` |
-| `Core\CommandManager.ps1` | `Core\CommandManager.cs` |
+| `Core\CommandManager.ps1` | `Core\CommandManager.cs`（メニュー管理のみ。検索ロジックは `UI\FuzzySearcher.psm1` に分離） |
 | `Core\WindowManager.ps1` | `Core\WindowManager.cs` |
 | `Core\BuiltinCommandExecutor.ps1` | `Core\BuiltinCommandExecutor.cs` |
-| `UI\LauncherForm.ps1` | `UI\LauncherForm.cs` |
+| `UI\FuzzySearcher.psm1` | （新規。汎用インクリメンタル・ファジー検索ポップアップ部品） |
+| `UI\LauncherForm.ps1` | `UI\LauncherForm.cs`（`FuzzySearcher` を呼び出す薄いラッパー） |
 | `UI\AddCommandForm.ps1` | `UI\AddCommandForm.cs` |
 | `UI\TrayIconManager.ps1` | `TrayIconManager.cs` |
 | `Utils\StringHelper.ps1` | `Utils\StringHelper.cs` |

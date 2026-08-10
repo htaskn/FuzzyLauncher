@@ -3,7 +3,7 @@
 # (C#版 Core/WindowManager.cs の移植)
 #
 # ウィンドウ列挙 (EnumWindows) はコールバックが必要なため
-# Interop.ps1 の [IncrementalLauncher.WindowFinder] に委譲している。
+# Interop.ps1 の [FuzzyLauncher.WindowFinder] に委譲している。
 # =============================================================================
 
 <#
@@ -15,11 +15,11 @@
 function Set-ActiveWindowInsideScreen {
     param([IntPtr]$CurrentHandle)
 
-    $hWnd = [IncrementalLauncher.NativeMethods]::GetForegroundWindow()
+    $hWnd = [FuzzyLauncher.NativeMethods]::GetForegroundWindow()
     if ($hWnd -eq [IntPtr]::Zero -or $hWnd -eq $CurrentHandle) { return }
 
-    $rect = New-Object IncrementalLauncher.RECT
-    if (-not [IncrementalLauncher.NativeMethods]::GetWindowRect($hWnd, [ref]$rect)) { return }
+    $rect = New-Object FuzzyLauncher.RECT
+    if (-not [FuzzyLauncher.NativeMethods]::GetWindowRect($hWnd, [ref]$rect)) { return }
 
     $width = $rect.Right - $rect.Left
     $height = $rect.Bottom - $rect.Top
@@ -42,7 +42,7 @@ function Set-ActiveWindowInsideScreen {
     if (($y + $height) -gt $workingArea.Bottom) { $height = $workingArea.Bottom - $y; $adjusted = $true }
 
     if ($adjusted) {
-        $null = [IncrementalLauncher.NativeMethods]::MoveWindow($hWnd, $x, $y, $width, $height, $true)
+        $null = [FuzzyLauncher.NativeMethods]::MoveWindow($hWnd, $x, $y, $width, $height, $true)
     }
 }
 
@@ -53,7 +53,7 @@ function Set-ActiveWindowInsideScreen {
 function Find-WindowByTitle {
     [OutputType([IntPtr])]
     param([string]$TitlePart)
-    return [IncrementalLauncher.WindowFinder]::FindWindowByTitle($TitlePart)
+    return [FuzzyLauncher.WindowFinder]::FindWindowByTitle($TitlePart)
 }
 
 <#
@@ -63,7 +63,7 @@ function Find-WindowByTitle {
 function Find-WindowByExeName {
     [OutputType([IntPtr])]
     param([string]$ExeName)
-    return [IncrementalLauncher.WindowFinder]::FindWindowByExeName($ExeName)
+    return [FuzzyLauncher.WindowFinder]::FindWindowByExeName($ExeName)
 }
 
 <#
@@ -73,7 +73,7 @@ function Find-WindowByExeName {
 function Find-WindowByClassName {
     [OutputType([IntPtr])]
     param([string]$ClassName)
-    return [IncrementalLauncher.WindowFinder]::FindWindowByClassName($ClassName)
+    return [FuzzyLauncher.WindowFinder]::FindWindowByClassName($ClassName)
 }
 
 <#
@@ -83,10 +83,10 @@ function Find-WindowByClassName {
 function Set-WindowActive {
     param([IntPtr]$Handle)
 
-    if ([IncrementalLauncher.NativeMethods]::IsIconic($Handle)) {
-        $null = [IncrementalLauncher.NativeMethods]::ShowWindow($Handle, [IncrementalLauncher.NativeMethods]::SW_RESTORE)
+    if ([FuzzyLauncher.NativeMethods]::IsIconic($Handle)) {
+        $null = [FuzzyLauncher.NativeMethods]::ShowWindow($Handle, [FuzzyLauncher.NativeMethods]::SW_RESTORE)
     }
-    $null = [IncrementalLauncher.NativeMethods]::SetForegroundWindow($Handle)
+    $null = [FuzzyLauncher.NativeMethods]::SetForegroundWindow($Handle)
 }
 
 <#
@@ -124,7 +124,7 @@ function Wait-ForActiveWindow {
             Set-WindowActive -Handle $hwndTarget
 
             # 3. 実際に今、そのウィンドウがフォアグラウンドになっているか確認
-            if ([IncrementalLauncher.NativeMethods]::GetForegroundWindow() -eq $hwndTarget) {
+            if ([FuzzyLauncher.NativeMethods]::GetForegroundWindow() -eq $hwndTarget) {
                 return $true
             }
         }
@@ -146,7 +146,7 @@ function Get-WindowTitle {
     param([IntPtr]$Handle)
 
     $sb = New-Object System.Text.StringBuilder 256
-    $null = [IncrementalLauncher.NativeMethods]::GetWindowText($Handle, $sb, $sb.Capacity)
+    $null = [FuzzyLauncher.NativeMethods]::GetWindowText($Handle, $sb, $sb.Capacity)
     return $sb.ToString()
 }
 
@@ -159,7 +159,7 @@ function Get-WindowExeName {
     param([IntPtr]$Handle)
 
     $processId = [uint32]0
-    $null = [IncrementalLauncher.NativeMethods]::GetWindowThreadProcessId($Handle, [ref]$processId)
+    $null = [FuzzyLauncher.NativeMethods]::GetWindowThreadProcessId($Handle, [ref]$processId)
     try {
         $proc = [System.Diagnostics.Process]::GetProcessById([int]$processId)
         try { return $proc.ProcessName + '.exe' } finally { $proc.Dispose() }
@@ -178,7 +178,7 @@ function Get-WindowClassName {
     param([IntPtr]$Handle)
 
     $sb = New-Object System.Text.StringBuilder 256
-    $null = [IncrementalLauncher.NativeMethods]::GetClassName($Handle, $sb, $sb.Capacity)
+    $null = [FuzzyLauncher.NativeMethods]::GetClassName($Handle, $sb, $sb.Capacity)
     return $sb.ToString()
 }
 

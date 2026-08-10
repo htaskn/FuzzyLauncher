@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    IncrementalLauncher (PowerShell版) のユニットテスト。
+    FuzzyLauncher (PowerShell版) のユニットテスト。
     C#版 IncrementalLauncher.Tests の xUnit テストを移植したもの（UI 非依存の純粋関数のみ）。
 
 .EXAMPLE
@@ -18,14 +18,10 @@ $script:BaseDirectory = Split-Path -Parent $PSScriptRoot
 
 . (Join-Path $script:BaseDirectory 'Utils\StringHelper.ps1')
 . (Join-Path $script:BaseDirectory 'Core\CommandListParser.ps1')
-
-# CommandManager.ps1 は UI 関数 (Show-LauncherError) を参照するのでスタブを置いてから読み込む
-function Show-LauncherError { param([string]$Message, $ErrorRecord = $null) }
-function Initialize-Resources { }
-. (Join-Path $script:BaseDirectory 'Core\CommandManager.ps1')
+Import-Module (Join-Path $script:BaseDirectory 'UI\FuzzySearcher.psm1') -Force
 
 # スコアリング用の設定（C#版のデフォルト値）
-$script:Settings = @{
+$script:ScoringOptions = @{
     MatchScore                 = 20
     ConsecutiveMatchBonus      = 20
     AbbreviationMatchBonus     = 20
@@ -69,7 +65,7 @@ function Assert-True {
 }
 
 function New-TestFolder {
-    $dir = Join-Path ([System.IO.Path]::GetTempPath()) ('IncrementalLauncherTest_' + [Guid]::NewGuid().ToString('N'))
+    $dir = Join-Path ([System.IO.Path]::GetTempPath()) ('FuzzyLauncherTest_' + [Guid]::NewGuid().ToString('N'))
     $null = New-Item -ItemType Directory -Path $dir
     return $dir
 }
@@ -425,45 +421,45 @@ Test-Case 'エスケープされたカンマを含むコマンドをパースで
 Write-Host "`nScoring" -ForegroundColor Cyan
 
 Test-Case '空クエリはスコア0でBingoは元の文字列' {
-    $r = Get-CommandScore -Target 'notepad' -Query ''
+    $r = Get-FuzzyMatchScore -Target 'notepad' -Query '' -Options $script:ScoringOptions
     Assert-Equal 0 $r.Score
     Assert-Equal 'notepad' $r.Bingo
 }
 
 Test-Case '先頭からの連続一致にボーナスが付く' {
     # n: match(20) + 先頭(20) / o: match(20) + 連続(20) = 80
-    $r = Get-CommandScore -Target 'notepad' -Query 'no'
+    $r = Get-FuzzyMatchScore -Target 'notepad' -Query 'no' -Options $script:ScoringOptions
     Assert-Equal 80 $r.Score
     Assert-Equal '**tepad' $r.Bingo
 }
 
 Test-Case '一致しない文字はペナルティになる' {
     # z は無い: -10
-    $r = Get-CommandScore -Target 'notepad' -Query 'z'
+    $r = Get-FuzzyMatchScore -Target 'notepad' -Query 'z' -Options $script:ScoringOptions
     Assert-Equal -10 $r.Score
 }
 
 Test-Case '連続ミスマッチは追加ペナルティ' {
     # z: -10 / z: -10 -10(連続) = -30
-    $r = Get-CommandScore -Target 'notepad' -Query 'zz'
+    $r = Get-FuzzyMatchScore -Target 'notepad' -Query 'zz' -Options $script:ScoringOptions
     Assert-Equal -30 $r.Score
 }
 
 Test-Case '略語入力(スネークケース)にボーナスが付く' {
     # m: match(20)+先頭(20) / c: match(20)+'_'の直後(20) = 80
-    $r = Get-CommandScore -Target 'my_command' -Query 'mc'
+    $r = Get-FuzzyMatchScore -Target 'my_command' -Query 'mc' -Options $script:ScoringOptions
     Assert-Equal 80 $r.Score
 }
 
 Test-Case '略語入力(キャメルケース)にボーナスが付く' {
     # M: match(20)+先頭(20) / C: match(20)+大文字(20) = 80
-    $r = Get-CommandScore -Target 'MyCommand' -Query 'mc'
+    $r = Get-FuzzyMatchScore -Target 'MyCommand' -Query 'mc' -Options $script:ScoringOptions
     Assert-Equal 80 $r.Score
 }
 
 Test-Case '同じ文字は二度マッチしない' {
     # a: match+先頭 / a: 2文字目のa / a: 3文字目のa
-    $r = Get-CommandScore -Target 'aaa' -Query 'aaaa'
+    $r = Get-FuzzyMatchScore -Target 'aaa' -Query 'aaaa' -Options $script:ScoringOptions
     Assert-Equal '***' $r.Bingo
 }
 

@@ -1,20 +1,15 @@
 ﻿# =============================================================================
-# LauncherForm.ps1 - ランチャー本体のフォームと入力処理
-# (C#版 UI/LauncherForm.cs の移植)
+# LauncherForm.ps1 - ランチャー本体（UI\FuzzySearcher.psm1 を呼び出す薄いラッパー）
 #
-# C#版のインスタンスフィールドは $script:UI ハッシュテーブルで保持する。
-#   Form           ... IncrementalLauncher.LauncherWindow
-#   ResultList     ... 検索結果を表示する ListView
-#   PromptLabel    ... 初期状態の表示(「?」)
-#   ItemToolTip    ... リストアイテムのツールチップ
-#   CurrentQuery   ... 現在入力中の検索文字列
-#   IsNavigating   ... メニュー遷移（&cmdList）を行ったかどうかのフラグ
-#   LastTooltipIndex . 前回ツールチップを表示したアイテムのインデックス
-#   DebugMode      ... デバッグ情報を表示するかどうか
-#   IsExecuting    ... コマンド実行中かどうか（再入防止）
+# インクリメンタル検索のGUI自体は UI\FuzzySearcher.psm1 に切り出されている。
+# このファイルの責務は次の3点のみ:
+#   1. $script:Settings から FuzzySearcher の Options（表示関連パラメータのみ）を組み立てる
+#   2. 現在のメニュー ($script:Menus / $script:CurrentMenu) から検索対象の Item 配列を組み立てる
+#   3. 選択されたコマンドの実行、メニュー遷移、グローバルキーボードフックの有効/無効を管理する
 # =============================================================================
 
-$script:UI = $null
+# コマンド実行中の再入防止フラグ（トリガーキー押下時の Invoke-LauncherToggle 用）
+$script:LauncherIsExecuting = $false
 
 <#
 .SYNOPSIS
@@ -42,7 +37,7 @@ function Show-LauncherError {
             '【詳細】' + [Environment]::NewLine + $detail
     }
 
-    $owner = if ($null -ne $script:UI) { $script:UI.Form } else { $null }
+    $owner = if ($null -ne $script:FuzzySearcherReady) { Get-FuzzySearcherForm } else { $null }
     if ($null -ne $owner) {
         $null = [System.Windows.Forms.MessageBox]::Show($owner, $fullMessage, 'エラー',
             [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
@@ -53,108 +48,83 @@ function Show-LauncherError {
     }
 }
 
+# =============================================================================
+# FuzzySearcher の構築（Options / Items の組み立て）
+# =============================================================================
+
 <#
 .SYNOPSIS
-    "Segoe UI" を優先し、なければ "Meiryo UI" にフォールバックしてフォントを作る。
+    現在のメニューのコマンドリストから FuzzySearcher 用の Item 配列を組み立てる。
 #>
-function New-LauncherFont {
-    [OutputType([System.Drawing.Font])]
-    param([single]$Size)
+function Get-LauncherItems {
+    [OutputType([array])]
+    param()
 
-    $font = New-Object System.Drawing.Font('Segoe UI', $Size, [System.Drawing.FontStyle]::Regular)
-    if ($font.Name -ne 'Segoe UI') {
-        $font.Dispose()
-        $font = New-Object System.Drawing.Font('Meiryo UI', $Size, [System.Drawing.FontStyle]::Regular)
-    }
-    return $font
+    $commands = Get-CurrentMenuCommands
+    return @($commands | ForEach-Object {
+        @{
+            Name    = $_.Name
+            Caption = $_.Caption
+            Fields  = @{ CommandLine = $_.CommandLine }
+            Tag     = $_
+        }
+    })
 }
 
 <#
 .SYNOPSIS
-    ランチャーフォームと配下のコントロールを構築する。
+    $script:Settings から FuzzySearcher の Options（部品専用パラメータ + コールバック）を組み立てる。
+#>
+function Build-LauncherOptions {
+    [OutputType([hashtable])]
+    param()
+
+    return @{
+        # 色/フォント/レイアウト
+        TextColor                   = $script:Settings.TextColor
+        BackgroundColor             = $script:Settings.BackgroundColor
+        BorderColor                 = $script:Settings.BorderColor
+        ListSelectedBackgroundColor = $script:Settings.ListSelectedBackgroundColor
+        PromptFontSize              = $script:Settings.PromptFontSize
+        ListFontSize                = $script:Settings.ListFontSize
+        CursorOffsetY               = $script:Settings.CursorOffsetY
+        MaxDisplayLines             = $script:Settings.MaxDisplayLines
+
+        # 挙動
+        ShowPromptWhenEmpty         = $script:Settings.ShowPromptAtRoot
+        BackspaceExitsImmediately   = $script:Settings.BackspaceExitsImmediately
+
+        # スコアリング
+        MatchScore                 = $script:Settings.MatchScore
+        ConsecutiveMatchBonus      = $script:Settings.ConsecutiveMatchBonus
+        AbbreviationMatchBonus     = $script:Settings.AbbreviationMatchBonus
+        MismatchPenalty            = $script:Settings.MismatchPenalty
+        ConsecutiveMismatchPenalty = $script:Settings.ConsecutiveMismatchPenalty
+
+        # カラム定義（オフにしたカラムはデバッグモード時のみ表示）
+        Columns = @(
+            @{ Field = 'Caption';     Show = $script:Settings.ShowCaption }
+            @{ Field = 'Name';        Show = $script:Settings.ShowName }
+            @{ Field = 'CommandLine'; Show = $script:Settings.ShowCommandLine; MaxLength = $script:Settings.MaxCommandLineLength; Tooltip = $true }
+            @{ Field = 'Score';       Show = $script:Settings.ShowScore }
+            @{ Field = 'Bingo';       Show = $script:Settings.ShowBingo }
+        )
+
+        # コールバック
+        OnSelect         = { param($Item) Invoke-LauncherItemSelected -Item $Item }
+        OnEmptyBackspace = { Invoke-LauncherEmptyBackspace }
+        OnClose          = { Close-Launcher }
+        OnLog            = { param($Message) Write-Verbose $Message }
+    }
+}
+
+<#
+.SYNOPSIS
+    ランチャーフォーム（FuzzySearcher）を構築する。アプリ起動時に一度だけ呼び出す。
 #>
 function New-LauncherForm {
-    $ui = @{
-        Form             = $null
-        ResultList       = $null
-        PromptLabel      = $null
-        ItemToolTip      = $null
-        CurrentQuery     = ''
-        IsNavigating     = $false
-        LastTooltipIndex = -1
-        DebugMode        = $script:InitialDebugMode
-        IsExecuting      = $false
-    }
-    $script:UI = $ui
-
-    # ---- フォームのスタイル ----
-    $form = New-Object IncrementalLauncher.LauncherWindow
-    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
-    $form.ShowInTaskbar = $false
-    $form.TopMost = $true
-    $form.BackColor = $script:Settings.BackgroundColor
-    $form.Padding = New-Object System.Windows.Forms.Padding(1)
-    $form.AutoSize = $false
-    $form.KeyPreview = $true
-    $form.ImeMode = [System.Windows.Forms.ImeMode]::Disable
-    $form.Size = New-Object System.Drawing.Size(30, 30)
-    $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Font
-    $form.Text = 'LauncherForm'
-    Set-FormAppIcon -Form $form
-    $ui.Form = $form
-
-    # 枠線の描画
-    $form.Add_Paint({
-        param($eventSender, $e)
-        [System.Windows.Forms.ControlPaint]::DrawBorder($e.Graphics, $eventSender.ClientRectangle,
-            $script:Settings.BorderColor, [System.Windows.Forms.ButtonBorderStyle]::Solid)
-    })
-
-    # ---- プロンプト（?）----
-    $label = New-Object System.Windows.Forms.Label
-    $label.Text = '?'
-    $label.UseMnemonic = $false
-    $label.Font = New-LauncherFont -Size $script:Settings.PromptFontSize
-    $label.AutoSize = $true
-    $label.ForeColor = $script:Settings.TextColor
-    $label.Location = New-Object System.Drawing.Point(
-        [int](($form.ClientSize.Width - $label.Width) / 2),
-        [int](($form.ClientSize.Height - $label.Height) / 2))
-    $form.Controls.Add($label)
-    $ui.PromptLabel = $label
-
-    # ---- 検索結果リスト ----
-    $list = New-Object System.Windows.Forms.ListView
-    $list.View = [System.Windows.Forms.View]::Details
-    $list.FullRowSelect = $true
-    $list.HeaderStyle = [System.Windows.Forms.ColumnHeaderStyle]::None
-    $list.BorderStyle = [System.Windows.Forms.BorderStyle]::None
-    $list.BackColor = $script:Settings.BackgroundColor
-    $list.ForeColor = $script:Settings.TextColor
-    $list.Font = New-LauncherFont -Size $script:Settings.ListFontSize
-    $list.Height = 0
-    $list.Visible = $false
-    $list.Location = New-Object System.Drawing.Point(3, 3)
-    $list.MultiSelect = $false
-    $list.OwnerDraw = $true
-
-    $list.Add_DrawColumnHeader({ param($eventSender, $e) $e.DrawDefault = $true })
-    $list.Add_DrawItem({ param($eventSender, $e) $e.DrawDefault = $false })
-    $list.Add_DrawSubItem({ param($eventSender, $e) Invoke-ResultListDrawSubItem $e })
-    $list.Add_MouseMove({ param($eventSender, $e) Invoke-ResultListMouseMove $e })
-    $list.Add_MouseLeave({ Hide-ResultListToolTip })
-
-    $form.Controls.Add($list)
-    $ui.ResultList = $list
-
-    $tip = New-Object System.Windows.Forms.ToolTip
-    $tip.InitialDelay = 400
-    $tip.ReshowDelay = 200
-    $ui.ItemToolTip = $tip
-
-    # フックからの BeginInvoke を受けられるようにハンドルを作成しておく
-    $null = $form.Handle
-
+    $form = New-FuzzySearcher -Options (Build-LauncherOptions)
+    $script:FuzzySearcherReady = $true
     return $form
 }
 
@@ -167,26 +137,11 @@ function New-LauncherForm {
     ランチャーを現在のマウスカーソル位置に表示する。
 #>
 function Show-LauncherAtCursor {
-    $ui = $script:UI
-
     Switch-Menu -MenuName ''      # 毎回ルートメニューから開始
-    $ui.CurrentQuery = ''
-    $ui.IsNavigating = $false     # 起動時はナビゲーション状態をリセット
-    Update-LauncherSearch
-
-    # カーソル位置の少し下に配置
-    $p = [System.Windows.Forms.Cursor]::Position
-    $p.Offset(0, $script:Settings.CursorOffsetY)
-
-    $ui.Form.Location = $p
-    $ui.Form.TopMost = $true
-    $ui.Form.Show()
-
-    # Update-LauncherSearch 後にサイズが確定してから位置調整
-    Set-LauncherPositionInScreen
+    Show-FuzzySearcher -Items (Get-LauncherItems) -SuppressPrompt:$false
 
     # 入力キャプチャ開始
-    [IncrementalLauncher.KeyboardHook]::IsActive = $true
+    [FuzzyLauncher.KeyboardHook]::IsActive = $true
 }
 
 <#
@@ -198,9 +153,8 @@ function Show-LauncherAtCursor {
 function Reset-LauncherInput {
     param([bool]$AsNavigation = $true)
 
-    $script:UI.CurrentQuery = ''
-    $script:UI.IsNavigating = $AsNavigation
-    Update-LauncherSearch
+    Set-FuzzySearcherItems -Items (Get-LauncherItems)
+    Reset-FuzzySearcherQuery -SuppressPrompt:$AsNavigation
 }
 
 <#
@@ -208,9 +162,8 @@ function Reset-LauncherInput {
     ランチャーを閉じる。
 #>
 function Close-Launcher {
-    [IncrementalLauncher.KeyboardHook]::IsActive = $false
-    $script:UI.Form.Hide()
-    $script:UI.CurrentQuery = ''
+    [FuzzyLauncher.KeyboardHook]::IsActive = $false
+    Hide-FuzzySearcher
 }
 
 <#
@@ -218,324 +171,52 @@ function Close-Launcher {
     ランチャーの表示/非表示を切り替える（トリガーキー押下時）。
 #>
 function Invoke-LauncherToggle {
-    if ($script:UI.IsExecuting) { return }   # コマンド実行中は無視（再入防止）
+    if ($script:LauncherIsExecuting) { return }   # コマンド実行中は無視（再入防止）
 
-    if ($script:UI.Form.Visible) { Close-Launcher }
+    if ((Get-FuzzySearcherForm).Visible) { Close-Launcher }
     else { Show-LauncherAtCursor }
 }
 
-<#
-.SYNOPSIS
-    ウィンドウがモニタ範囲外に出ないように位置を調整する。
-#>
-function Set-LauncherPositionInScreen {
-    $form = $script:UI.Form
-    $p = $form.Location
-    $screen = [System.Windows.Forms.Screen]::FromPoint($p)
-    $workingArea = $screen.WorkingArea
-
-    if (($p.X + $form.Width) -gt $workingArea.Right)   { $p.X = $workingArea.Right - $form.Width }
-    if (($p.Y + $form.Height) -gt $workingArea.Bottom) { $p.Y = [System.Windows.Forms.Cursor]::Position.Y - $form.Height - 10 }
-    if ($p.X -lt $workingArea.Left)                    { $p.X = $workingArea.Left }
-    if ($p.Y -lt $workingArea.Top)                     { $p.Y = $workingArea.Top }
-
-    $form.Location = $p
-}
-
 # =============================================================================
-# 入力処理
+# 入力処理（KeyboardHook からの薄い委譲）
 # =============================================================================
 
-<#
-.SYNOPSIS
-    キー押下イベントの処理（仮想キーコードを受け取る）。
-#>
 function Invoke-LauncherKeyDown {
     param([int]$VirtualKeyCode)
-
-    if (-not $script:UI.Form.Visible) { return }
-
-    $key = [System.Windows.Forms.Keys]$VirtualKeyCode
-
-    if ($key -eq [System.Windows.Forms.Keys]::Escape) {
-        Close-Launcher
-        return
-    }
-
-    if ($key -eq [System.Windows.Forms.Keys]::Enter -or $key -eq [System.Windows.Forms.Keys]::Tab) {
-        # ?プロンプトが表示されていたら閉じる
-        # リストが表示されているなら空文字でも実行させる（戻るメニューなどのため）
-        if ($script:UI.PromptLabel.Visible) {
-            Close-Launcher
-            return
-        }
-        Invoke-LauncherSelection
-        return
-    }
-
-    if ($key -eq [System.Windows.Forms.Keys]::Up) {
-        Move-LauncherSelection -Delta -1
-        return
-    }
-    if ($key -eq [System.Windows.Forms.Keys]::Down) {
-        Move-LauncherSelection -Delta 1
-        return
-    }
+    Invoke-FuzzySearcherKeyDown -VirtualKeyCode $VirtualKeyCode
 }
 
-<#
-.SYNOPSIS
-    1文字入力の処理。
-#>
 function Invoke-LauncherInputChar {
     param([char]$Char)
-
-    if (-not $script:UI.Form.Visible) { return }
-
-    # バックスペース処理
-    if ([int]$Char -eq [int][System.Windows.Forms.Keys]::Back) {
-        Invoke-LauncherBackspace
-        return
-    }
-
-    if ([int]$Char -eq [int][System.Windows.Forms.Keys]::Escape -or
-        [int]$Char -eq [int][System.Windows.Forms.Keys]::Enter) {
-        return
-    }
-
-    # 制御文字以外を入力クエリに追加
-    if (-not [char]::IsControl($Char)) {
-        $script:UI.CurrentQuery += $Char
-        Update-LauncherSearch
-    }
-}
-
-<#
-.SYNOPSIS
-    バックスペース処理を実行する。
-#>
-function Invoke-LauncherBackspace {
-    # BackspaceExitsImmediately オプションが $true の場合、即座に終了
-    if ($script:Settings.BackspaceExitsImmediately) {
-        Close-Launcher
-        return
-    }
-
-    $query = $script:UI.CurrentQuery
-    if ($query.Length -gt 0) {
-        $script:UI.CurrentQuery = $query.Substring(0, $query.Length - 1)
-        Update-LauncherSearch
-    }
-    else {
-        # クエリが空の場合の挙動
-        if (-not (Test-IsRootMenu)) {
-            # サブメニューにいる場合はルートに戻る
-            Switch-Menu -MenuName ''
-            Reset-LauncherInput
-        }
-        else {
-            # ルートグループにいる場合はランチャーを終了
-            Close-Launcher
-        }
-    }
-}
-
-<#
-.SYNOPSIS
-    リストの選択項目を移動する（端でループする）。
-#>
-function Move-LauncherSelection {
-    param([int]$Delta)
-
-    $list = $script:UI.ResultList
-    if (-not $list.Visible -or $list.Items.Count -eq 0) { return }
-
-    $currentIndex = if ($list.SelectedIndices.Count -gt 0) { $list.SelectedIndices[0] } else { -1 }
-    $newIndex = $currentIndex + $Delta
-
-    # 上端で上キー → 最下段へ / 下端で下キー → 最上段へ
-    if ($newIndex -lt 0) { $newIndex = $list.Items.Count - 1 }
-    elseif ($newIndex -ge $list.Items.Count) { $newIndex = 0 }
-
-    $list.Items[$newIndex].Selected = $true
-    $list.Items[$newIndex].Focused = $true
-    $list.EnsureVisible($newIndex)
+    Invoke-FuzzySearcherChar -Char $Char
 }
 
 # =============================================================================
-# 検索結果の更新
+# FuzzySearcher からのコールバック
 # =============================================================================
 
 <#
 .SYNOPSIS
-    検索結果を更新する。
+    空クエリでBackspaceが押された時の処理（FuzzySearcherの OnEmptyBackspace コールバック）。
+.OUTPUTS
+    サブメニューにいた場合はルートに戻して $true（部品側の既定close動作を抑止）、
+    ルートグループにいた場合は $false（部品側にclose処理を委ねる）。
 #>
-function Update-LauncherSearch {
-    $ui = $script:UI
+function Invoke-LauncherEmptyBackspace {
+    [OutputType([bool])]
+    param()
 
-    # プロンプト（?）の表示制御
-    if ([string]::IsNullOrEmpty($ui.CurrentQuery) -and
-        (Test-IsRootMenu) -and
-        $script:Settings.ShowPromptAtRoot -and
-        -not $ui.IsNavigating) {
-        Show-LauncherPrompt
-        return
+    if (-not (Test-IsRootMenu)) {
+        Switch-Menu -MenuName ''
+        Reset-LauncherInput
+        return $true
     }
-
-    $ui.PromptLabel.Visible = $false
-    $ui.ResultList.Visible = $true
-
-    # 検索実行とリスト更新
-    $results = Search-Command -Query $ui.CurrentQuery
-    Write-Verbose "[Launcher] Search Query: '$($ui.CurrentQuery)', Results: $($results.Count)"
-    Update-LauncherResultList -Results $results
-
-    # レイアウト調整
-    Set-LauncherLayout
+    return $false
 }
 
 <#
 .SYNOPSIS
-    プロンプト（?）だけを表示する状態にする。
-#>
-function Show-LauncherPrompt {
-    $ui = $script:UI
-    $ui.ResultList.Visible = $false
-    $ui.PromptLabel.Visible = $true
-    $ui.Form.Size = New-Object System.Drawing.Size(30, 30)
-    $ui.PromptLabel.Location = New-Object System.Drawing.Point(
-        [int](($ui.Form.Width - $ui.PromptLabel.Width) / 2),
-        [int](($ui.Form.Height - $ui.PromptLabel.Height) / 2))
-}
-
-<#
-.SYNOPSIS
-    ListView の内容を検索結果で更新する。
-#>
-function Update-LauncherResultList {
-    param($Results)
-
-    $list = $script:UI.ResultList
-    $list.BeginUpdate()
-    try {
-        $list.Items.Clear()
-        Sync-LauncherColumns
-
-        foreach ($r in $Results) {
-            $lvi = New-LauncherListViewItem -Result $r
-            $null = $list.Items.Add($lvi)
-        }
-
-        foreach ($column in $list.Columns) {
-            $column.AutoResize([System.Windows.Forms.ColumnHeaderAutoResizeStyle]::ColumnContent)
-        }
-
-        if ($list.Items.Count -gt 0) {
-            $list.Items[0].Selected = $true
-            $list.Items[0].Focused = $true
-        }
-    }
-    finally {
-        $list.EndUpdate()
-    }
-}
-
-<#
-.SYNOPSIS
-    検索結果1件分の ListViewItem を生成する。
-#>
-function New-LauncherListViewItem {
-    param($Result)
-
-    $list = $script:UI.ResultList
-    if ($list.Columns.Count -eq 0) { return (New-Object System.Windows.Forms.ListViewItem) }
-
-    $firstValue = Get-LauncherColumnValue -Result $Result -ColumnName $list.Columns[0].Text
-    $lvi = New-Object System.Windows.Forms.ListViewItem($firstValue)
-
-    for ($i = 1; $i -lt $list.Columns.Count; $i++) {
-        $value = Get-LauncherColumnValue -Result $Result -ColumnName $list.Columns[$i].Text
-        $null = $lvi.SubItems.Add($value)
-    }
-
-    $lvi.Tag = $Result.Command
-    $lvi.ToolTipText = $Result.Command.CommandLine
-    return $lvi
-}
-
-<#
-.SYNOPSIS
-    DebugMode および設定の状態に合わせて ListView のカラム構成を更新する。
-#>
-function Sync-LauncherColumns {
-    $list = $script:UI.ResultList
-    $debug = $script:UI.DebugMode
-    $list.Columns.Clear()
-
-    # 表示するカラムのみを追加
-    if ($script:Settings.ShowCaption     -or $debug) { $null = $list.Columns.Add('Caption', -2) }
-    if ($script:Settings.ShowName        -or $debug) { $null = $list.Columns.Add('Name', -2) }
-    if ($script:Settings.ShowCommandLine -or $debug) { $null = $list.Columns.Add('CommandLine', -2) }
-    if ($script:Settings.ShowScore       -or $debug) { $null = $list.Columns.Add('Score', -2) }
-    if ($script:Settings.ShowBingo       -or $debug) { $null = $list.Columns.Add('Bingo', -2) }
-}
-
-<#
-.SYNOPSIS
-    カラム名に対応する値を取得する。
-#>
-function Get-LauncherColumnValue {
-    [OutputType([string])]
-    param($Result, [string]$ColumnName)
-
-    switch ($ColumnName) {
-        'Caption'     { return $Result.Command.Caption }
-        'Name'        { return $Result.Command.Name }
-        'CommandLine' { return (Get-TruncatedString -Text $Result.Command.CommandLine -MaxLength $script:Settings.MaxCommandLineLength) }
-        'Score'       { return [string]$Result.Score }
-        'Bingo'       { return $Result.Bingo }
-        default       { return '' }
-    }
-}
-
-<#
-.SYNOPSIS
-    リストとフォームのサイズ・位置を調整する。
-#>
-function Set-LauncherLayout {
-    $ui = $script:UI
-    $list = $ui.ResultList
-
-    # 高さ計算
-    $itemHeight = if ($list.Items.Count -gt 0) { $list.GetItemRect(0).Height } else { 20 }
-    $count = [Math]::Max(1, $list.Items.Count)
-    $displayCount = [Math]::Min($count, $script:Settings.MaxDisplayLines)
-    $desiredHeight = ($displayCount * $itemHeight) + 4
-
-    # 幅計算
-    $totalColumnWidth = 0
-    foreach ($col in $list.Columns) { $totalColumnWidth += $col.Width }
-    $list.Width = $totalColumnWidth + 20
-    $list.Height = $desiredHeight
-
-    # フォームサイズ更新
-    $ui.Form.Size = New-Object System.Drawing.Size(($list.Width + 6), ($desiredHeight + 6))
-
-    # 位置調整
-    $p = [System.Windows.Forms.Cursor]::Position
-    $p.Offset(0, $script:Settings.CursorOffsetY)
-    $ui.Form.Location = $p
-
-    Set-LauncherPositionInScreen
-}
-
-# =============================================================================
-# コマンドの実行
-# =============================================================================
-
-<#
-.SYNOPSIS
-    選択されている項目を実行する。
+    アイテムが選択された時の処理（FuzzySearcherの OnSelect コールバック）。
 .DESCRIPTION
     【処理の機序】
     1. まずキーボードフックを無効化してフォームを非表示にする（Escと同じ状態にする）
@@ -545,17 +226,15 @@ function Set-LauncherLayout {
        フォームを再表示してキーボードフックを有効に戻す
     4. SuccessClose の場合は Close-Launcher でクエリリセットなどの後処理が済んでいる
 #>
-function Invoke-LauncherSelection {
-    $ui = $script:UI
-    if ($ui.IsExecuting) { return }
+function Invoke-LauncherItemSelected {
+    param($Item)
 
-    $list = $ui.ResultList
-    if (-not $list.Visible -or $list.SelectedItems.Count -eq 0) { return }
+    if ($script:LauncherIsExecuting) { return }
 
-    $cmd = $list.SelectedItems[0].Tag
+    $cmd = $Item.Tag
     if ($null -eq $cmd) { return }
 
-    $ui.IsExecuting = $true
+    $script:LauncherIsExecuting = $true
     $shouldClose = $true
     try {
         # ESCキー押下時と同様に、フォームを完全にリセットしてからコマンドを実行する
@@ -566,19 +245,25 @@ function Invoke-LauncherSelection {
         $shouldClose = Invoke-CommandItem -Command $cmd
     }
     finally {
-        $ui.IsExecuting = $false
+        $script:LauncherIsExecuting = $false
     }
 
     # 実行後に KeepOpen 指示があった場合のみ再表示
     if (-not $shouldClose) {
-        # 再表示時は必要であればプロンプト（ルートメニュー）を表示する
-        $ui.Form.Show()
-        if ([string]::IsNullOrEmpty($ui.CurrentQuery) -and (Test-IsRootMenu) -and $script:Settings.ShowPromptAtRoot) {
-            Show-LauncherPrompt
+        (Get-FuzzySearcherForm).Show()
+        [FuzzyLauncher.KeyboardHook]::IsActive = $true
+
+        # ルートグループでクエリが空の場合は「?」プロンプトへ強制的に戻す
+        # （Close-Launcher で CurrentQuery は既に空になっている）
+        if ((Test-IsRootMenu) -and $script:Settings.ShowPromptAtRoot) {
+            Reset-FuzzySearcherQuery -SuppressPrompt:$false
         }
-        [IncrementalLauncher.KeyboardHook]::IsActive = $true
     }
 }
+
+# =============================================================================
+# コマンドの実行
+# =============================================================================
 
 <#
 .SYNOPSIS
@@ -631,78 +316,4 @@ function Invoke-CommandItem {
         Show-LauncherError -Message 'コマンドの実行に失敗しました。' -ErrorRecord $_
         return $true
     }
-}
-
-# =============================================================================
-# ListView OwnerDraw / ツールチップ
-# =============================================================================
-
-<#
-.SYNOPSIS
-    ListView のサブアイテム描画（選択行の背景色をカスタマイズ）。
-#>
-function Invoke-ResultListDrawSubItem {
-    param($e)
-
-    if ($null -eq $e.Item -or $null -eq $e.SubItem) { return }
-
-    $backColor = if ($e.Item.Selected) { $script:Settings.ListSelectedBackgroundColor }
-                 else { $script:Settings.BackgroundColor }
-
-    $brush = New-Object System.Drawing.SolidBrush($backColor)
-    try { $e.Graphics.FillRectangle($brush, $e.Bounds) }
-    finally { $brush.Dispose() }
-
-    $flags = [System.Windows.Forms.TextFormatFlags]::Left -bor
-             [System.Windows.Forms.TextFormatFlags]::VerticalCenter -bor
-             [System.Windows.Forms.TextFormatFlags]::NoPrefix
-
-    [System.Windows.Forms.TextRenderer]::DrawText(
-        $e.Graphics, $e.SubItem.Text, $e.Item.Font, $e.Bounds, $script:Settings.TextColor, $flags)
-}
-
-<#
-.SYNOPSIS
-    リストアイテム上にマウスが移動した時にツールチップを表示する。
-#>
-function Invoke-ResultListMouseMove {
-    param($e)
-
-    $ui = $script:UI
-    $list = $ui.ResultList
-    $hitTest = $list.HitTest($e.Location)
-
-    if ($null -ne $hitTest.Item -and $null -ne $hitTest.SubItem) {
-        # CommandLine カラム上のみツールチップを表示
-        $subItemIndex = $hitTest.Item.SubItems.IndexOf($hitTest.SubItem)
-        $isCommandLineColumn = ($subItemIndex -ge 0) -and
-                               ($subItemIndex -lt $list.Columns.Count) -and
-                               ($list.Columns[$subItemIndex].Text -eq 'CommandLine')
-
-        if ($isCommandLineColumn) {
-            $index = $hitTest.Item.Index
-            if ($index -ne $ui.LastTooltipIndex) {
-                $ui.LastTooltipIndex = $index
-                $tipText = $hitTest.Item.ToolTipText
-                if (-not [string]::IsNullOrEmpty($tipText)) {
-                    $ui.ItemToolTip.Show($tipText, $list, $e.X + 15, $e.Y + 15)
-                }
-            }
-        }
-        else {
-            Hide-ResultListToolTip
-        }
-    }
-    else {
-        Hide-ResultListToolTip
-    }
-}
-
-<#
-.SYNOPSIS
-    ツールチップを非表示にする。
-#>
-function Hide-ResultListToolTip {
-    $script:UI.ItemToolTip.Hide($script:UI.ResultList)
-    $script:UI.LastTooltipIndex = -1
 }
