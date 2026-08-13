@@ -57,6 +57,9 @@ function New-TrayContextMenu {
         }
     })
 
+    # 環境変数登録メニュー
+    $null = $menu.Items.Add('このアプリのパスを環境変数(FUZZY_LAUNCHER_PATH)に登録', $null, { Register-FuzzyLauncherPathEnv })
+
     # 再起動メニュー
     $null = $menu.Items.Add('アプリを再起動', $null, { Restart-LauncherApp })
 
@@ -75,6 +78,24 @@ function New-TrayContextMenu {
     $null = $menu.Items.Add('終了', $null, { Stop-LauncherApp })
 
     return $menu
+}
+
+<#
+.SYNOPSIS
+    このアプリのインストールフォルダのパスを環境変数 FUZZY_LAUNCHER_PATH としてPCに登録する。
+.DESCRIPTION
+    他ツールやコマンドリスト内から本アプリのフォルダを環境変数経由で参照できるようにするための処理
+    (feniの &FENI_PATH 登録メニューと同じ役割)。
+#>
+function Register-FuzzyLauncherPathEnv {
+    [Environment]::SetEnvironmentVariable('FUZZY_LAUNCHER_PATH', $script:BaseDirectory, 'User')
+    $env:FUZZY_LAUNCHER_PATH = $script:BaseDirectory
+
+    $null = [System.Windows.Forms.MessageBox]::Show(
+        "環境変数 FUZZY_LAUNCHER_PATH に以下のパスを登録しました。`n(反映には他アプリの再起動が必要な場合があります)`n`n$($script:BaseDirectory)",
+        'FuzzyLauncher',
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information)
 }
 
 <#
