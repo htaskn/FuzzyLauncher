@@ -23,7 +23,8 @@
         Core\AppSettings.ps1         -> 設定管理
         Core\CommandListParser.ps1   -> コマンドリストファイルのパース
         Core\CommandManager.ps1      -> メニュー管理（検索ロジックは含まない）
-        Core\BuiltinCommandExecutor.ps1 -> & から始まる内製コマンドの実行
+        Core\BuiltinCommandManager.ps1 -> & から始まる内製コマンドの登録・実行（Core\BuiltinCommands\ を自動読込）
+        Core\BuiltinCommands\*.ps1    -> 個々の内製コマンドの実装（1コマンド=1ファイル）
         Core\WindowManager.ps1       -> ウィンドウ操作
         Core\Interop.ps1             -> Win32 API / KeyboardHook / LauncherWindow (C#)
         UI\FuzzySearcher.psm1        -> 汎用インクリメンタル・ファジー検索ポップアップ部品
@@ -82,7 +83,8 @@ $script:StartupCommand = '"{0}" -STA -NoProfile -ExecutionPolicy Bypass -WindowS
 . (Join-Path $PSScriptRoot 'Core\CommandListParser.ps1')
 . (Join-Path $PSScriptRoot 'Core\CommandManager.ps1')
 . (Join-Path $PSScriptRoot 'Core\WindowManager.ps1')
-. (Join-Path $PSScriptRoot 'Core\BuiltinCommandExecutor.ps1')
+. (Join-Path $PSScriptRoot 'Core\BuiltinCommandManager.ps1')
+Import-BuiltinCommands
 Import-Module (Join-Path $PSScriptRoot 'UI\FuzzySearcher.psm1') -Force
 . (Join-Path $PSScriptRoot 'UI\LauncherForm.ps1')
 . (Join-Path $PSScriptRoot 'UI\AddCommandForm.ps1')

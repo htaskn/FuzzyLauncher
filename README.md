@@ -43,7 +43,8 @@ STA でない状態（`-MTA` や一部のホスト）で起動された場合は
 | `Core\CommandListParser.ps1` | `Core\CommandListParser.cs`, `Models\CommandItem.cs` |
 | `Core\CommandManager.ps1` | `Core\CommandManager.cs`（メニュー管理のみ。検索ロジックは `UI\FuzzySearcher.psm1` に分離） |
 | `Core\WindowManager.ps1` | `Core\WindowManager.cs` |
-| `Core\BuiltinCommandExecutor.ps1` | `Core\BuiltinCommandExecutor.cs` |
+| `Core\BuiltinCommandManager.ps1` | `Core\BuiltinCommandExecutor.cs`（登録・ディスパッチのみ。個々のコマンドは `Core\BuiltinCommands\*.ps1` に分離） |
+| `Core\BuiltinCommands\*.ps1` | （新規。1コマンド=1ファイルで実装し、起動時に自動読込される） |
 | `UI\FuzzySearcher.psm1` | （新規。汎用インクリメンタル・ファジー検索ポップアップ部品） |
 | `UI\LauncherForm.ps1` | `UI\LauncherForm.cs`（`FuzzySearcher` を呼び出す薄いラッパー） |
 | `UI\AddCommandForm.ps1` | `UI\AddCommandForm.cs` |
