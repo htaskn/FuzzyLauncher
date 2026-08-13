@@ -154,6 +154,9 @@ function ConvertTo-CommandItem {
     $name = $parts[1].Trim()
     $cmdLine = $parts[2].Trim()
 
+    # 表示名が省略された場合はコマンド名で補完する
+    if ([string]::IsNullOrEmpty($caption)) { $caption = $name }
+
     # 変数展開（未定義変数があれば例外をスロー → 呼び出し元でキャッチしてスキップ）
     $cmdLine = Expand-CommandVariable -Text $cmdLine -Variables $Variables
 

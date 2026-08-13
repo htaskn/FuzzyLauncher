@@ -208,6 +208,20 @@ Test-Case '基本的なコマンド行をパースできる' {
     finally { Remove-Item -LiteralPath $dir -Recurse -Force }
 }
 
+Test-Case '表示名が省略された場合はコマンド名で補完される' {
+    $dir = New-TestFolder
+    try {
+        New-TestCommandFile $dir 'test.txt' ', notepad, notepad.exe'
+        $result = Invoke-CommandListParse -CommandsFolder $dir
+
+        Assert-Equal 0 $result.Errors.Count
+        Assert-Equal 1 $result.Menus[''].Count
+        Assert-Equal 'notepad' $result.Menus[''][0].Caption
+        Assert-Equal 'notepad' $result.Menus[''][0].Name
+    }
+    finally { Remove-Item -LiteralPath $dir -Recurse -Force }
+}
+
 Test-Case '複数行のコマンドをパースできる' {
     $dir = New-TestFolder
     try {
