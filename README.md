@@ -52,6 +52,7 @@ STA でない状態（`-MTA` や一部のホスト）で起動された場合は
 | `Utils\StringHelper.ps1` | `Utils\StringHelper.cs` |
 | `Utils\IconLoader.ps1` | `Utils\IconLoader.cs` |
 | `Utils\ResourceInitializer.ps1` | `Utils\ResourceInitializer.cs` |
+| `Utils\EnvironmentSync.ps1` | （新規。レジストリから最新の環境変数を読み直し、コマンドリストの `%VAR%` 展開をログオフ不要で反映する） |
 | `Tests\Run-Tests.ps1` | `IncrementalLauncher.Tests\*.cs`（純粋関数のみ） |
 
 `settings.ini` と `commands\` フォルダは **このスクリプトと同じフォルダ**（C#版でいう exe と同じ位置）に自動生成されます。
