@@ -58,7 +58,7 @@ function New-TrayContextMenu {
     })
 
     # 環境変数登録メニュー
-    $null = $menu.Items.Add('このアプリのパスを環境変数(FUZZY_LAUNCHER_PATH)に登録', $null, { Register-FuzzyLauncherPathEnv })
+    $null = $menu.Items.Add('アプリのパスを環境変数に保存', $null, { Register-FuzzyLauncherPathEnv })
 
     # 再起動メニュー
     $null = $menu.Items.Add('アプリを再起動', $null, { Restart-LauncherApp })
