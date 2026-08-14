@@ -272,6 +272,26 @@ function Add-CommandFileItems {
 
 <#
 .SYNOPSIS
+    表示名・実行コマンドをセットし、表示名から生成したコマンド名も
+    有効な場合のみセットする（Set-AddCommandFromClipboard の3判定で共通の後処理）。
+#>
+function Set-AddCommandFieldsFromMatch {
+    param(
+        [string]$Title,
+        [string]$CommandLine,
+        [string]$NameSeparatorReplacement
+    )
+
+    $state = $script:AddCmd
+    $state.TxtTitle.Text = $Title
+    $state.TxtCmdLine.Text = $CommandLine
+
+    $cmdName = $Title.ToLowerInvariant().Replace(' ', $NameSeparatorReplacement)
+    if (Test-ValidCommandName -Name $cmdName) { $state.TxtName.Text = $cmdName }
+}
+
+<#
+.SYNOPSIS
     クリップボードの内容を判定して初期入力を行う。
 #>
 function Set-AddCommandFromClipboard {
@@ -288,23 +308,16 @@ function Set-AddCommandFromClipboard {
 
         # URL判定
         if (Test-IsUrl -Text $clipText) {
-            $state.TxtCmdLine.Text = "&url $clipText"
-            $domain = Get-UrlDomainName -Url $clipText
-            $state.TxtTitle.Text = $domain
-
-            $cmdName = $domain.ToLowerInvariant().Replace(' ', '')
-            if (Test-ValidCommandName -Name $cmdName) { $state.TxtName.Text = $cmdName }
+            Set-AddCommandFieldsFromMatch -Title (Get-UrlDomainName -Url $clipText) `
+                -CommandLine "&url $clipText" -NameSeparatorReplacement ''
             return
         }
 
         # ファイルパス判定
         if ([System.IO.File]::Exists($clipText)) {
             $fileName = [System.IO.Path]::GetFileNameWithoutExtension($clipText)
-            $state.TxtCmdLine.Text = '"' + $clipText + '"'
-            $state.TxtTitle.Text = $fileName
-
-            $cmdName = $fileName.ToLowerInvariant().Replace(' ', '_')
-            if (Test-ValidCommandName -Name $cmdName) { $state.TxtName.Text = $cmdName }
+            Set-AddCommandFieldsFromMatch -Title $fileName `
+                -CommandLine ('"' + $clipText + '"') -NameSeparatorReplacement '_'
             return
         }
 
@@ -316,11 +329,8 @@ function Set-AddCommandFromClipboard {
                 # ルートドライブの場合（例: C:\）
                 $folderName = $clipText.TrimEnd($trimChars)
             }
-            $state.TxtCmdLine.Text = 'explorer "' + $clipText + '"'
-            $state.TxtTitle.Text = $folderName
-
-            $cmdName = $folderName.ToLowerInvariant().Replace(' ', '_')
-            if (Test-ValidCommandName -Name $cmdName) { $state.TxtName.Text = $cmdName }
+            Set-AddCommandFieldsFromMatch -Title $folderName `
+                -CommandLine ('explorer "' + $clipText + '"') -NameSeparatorReplacement '_'
             return
         }
     }
@@ -331,36 +341,46 @@ function Set-AddCommandFromClipboard {
 
 <#
 .SYNOPSIS
+    入力エラーを警告ダイアログで通知する。
+#>
+function Show-AddCommandInputWarning {
+    param([string]$Message)
+    $null = [System.Windows.Forms.MessageBox]::Show($Message, '入力エラー',
+        [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+}
+
+<#
+.SYNOPSIS
+    テキストボックスが未入力の場合、警告してフォーカスを当てる。
+.OUTPUTS
+    入力済みなら $true、未入力なら $false（呼び出し元はこの場合returnする）
+#>
+function Test-AddCommandRequiredField {
+    [OutputType([bool])]
+    param([System.Windows.Forms.TextBox]$TextBox, [string]$FieldLabel)
+
+    if ([string]::IsNullOrWhiteSpace($TextBox.Text)) {
+        Show-AddCommandInputWarning -Message "${FieldLabel}を入力してください。"
+        $TextBox.Focus()
+        return $false
+    }
+    return $true
+}
+
+<#
+.SYNOPSIS
     追加ボタンクリック時の処理。
 #>
 function Invoke-AddCommandClick {
     $state = $script:AddCmd
 
     # ---- バリデーション ----
-    if ([string]::IsNullOrWhiteSpace($state.TxtTitle.Text)) {
-        $null = [System.Windows.Forms.MessageBox]::Show('表示名を入力してください。', '入力エラー',
-            [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
-        $state.TxtTitle.Focus()
-        return
-    }
-
-    if ([string]::IsNullOrWhiteSpace($state.TxtName.Text)) {
-        $null = [System.Windows.Forms.MessageBox]::Show('コマンド名を入力してください。', '入力エラー',
-            [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
-        $state.TxtName.Focus()
-        return
-    }
-
-    if ([string]::IsNullOrWhiteSpace($state.TxtCmdLine.Text)) {
-        $null = [System.Windows.Forms.MessageBox]::Show('実行コマンドを入力してください。', '入力エラー',
-            [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
-        $state.TxtCmdLine.Focus()
-        return
-    }
+    if (-not (Test-AddCommandRequiredField -TextBox $state.TxtTitle -FieldLabel '表示名')) { return }
+    if (-not (Test-AddCommandRequiredField -TextBox $state.TxtName -FieldLabel 'コマンド名')) { return }
+    if (-not (Test-AddCommandRequiredField -TextBox $state.TxtCmdLine -FieldLabel '実行コマンド')) { return }
 
     if ($null -eq $state.CmbFile.SelectedItem) {
-        $null = [System.Windows.Forms.MessageBox]::Show('追加先ファイルを選択してください。', '入力エラー',
-            [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+        Show-AddCommandInputWarning -Message '追加先ファイルを選択してください。'
         return
     }
 

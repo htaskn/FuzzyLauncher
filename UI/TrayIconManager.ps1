@@ -29,32 +29,14 @@ function New-TrayContextMenu {
 
     # コマンド編集メニュー
     $null = $menu.Items.Add('コマンドリストを編集', $null, {
-        try {
-            Initialize-Resources
-            $defaultFile = Join-Path $script:Settings.CommandsFolder 'default.txt'
-            $psi = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName = 'notepad.exe'
-            $psi.Arguments = '"' + $defaultFile + '"'
-            $psi.UseShellExecute = $true
-            $null = [System.Diagnostics.Process]::Start($psi)
-        }
-        catch {
-            Show-LauncherError -Message 'エディタの起動に失敗しました。' -ErrorRecord $_
-        }
+        Initialize-Resources
+        $defaultFile = Join-Path $script:Settings.CommandsFolder 'default.txt'
+        Open-FileInNotepad -Path $defaultFile
     })
 
     # 設定編集メニュー
     $null = $menu.Items.Add('設定を編集', $null, {
-        try {
-            $psi = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName = 'notepad.exe'
-            $psi.Arguments = '"' + $script:SettingsFile + '"'
-            $psi.UseShellExecute = $true
-            $null = [System.Diagnostics.Process]::Start($psi)
-        }
-        catch {
-            Show-LauncherError -Message 'エディタの起動に失敗しました。' -ErrorRecord $_
-        }
+        Open-FileInNotepad -Path $script:SettingsFile
     })
 
     # 環境変数登録メニュー

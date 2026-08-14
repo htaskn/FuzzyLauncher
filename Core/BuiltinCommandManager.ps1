@@ -95,16 +95,30 @@ function Invoke-BuiltinCommand {
 
     # プレフィックス長が長いものから順に判定する（最長一致優先）
     foreach ($prefix in $script:BuiltinHandlerPrefixesByLength) {
-        if ($command.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
-            Write-Verbose "[BuiltinCommandManager] Executing builtin command: '$prefix' from line: '$CmdLine'"
+        if (-not $command.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
 
-            # 固定値はいずれも「& + プレフィックス長」なので一律に算出する
-            $offset = $prefix.Length + 1
-            $arg = if ($CmdLine.Length -gt $offset) { $CmdLine.Substring($offset) } else { '' }
-
-            $result = & $script:BuiltinHandlers[$prefix] $CmdLine $arg
-            return [string](@($result)[-1])
+        # プレフィックスが空白で終わっていない（=引数を取らない、または引数区切りが
+        # 必須でない）コマンドは、直後が文字列終端か空白でなければ別物とみなして
+        # 不一致扱いにする。これがないと、例えば "&exitThisAppp" のような誤字を
+        # "exitThisApp" として黙って実行してしまう（末尾の "p" が引数として無視される）。
+        # プレフィックスが空白で終わっている場合は StartsWith の時点で境界チェック済み。
+        if (-not $prefix.EndsWith(' ')) {
+            $boundaryIndex = $prefix.Length
+            if ($command.Length -gt $boundaryIndex -and -not [char]::IsWhiteSpace($command[$boundaryIndex])) {
+                continue
+            }
         }
+
+        Write-Verbose "[BuiltinCommandManager] Executing builtin command: '$prefix' from line: '$CmdLine'"
+
+        # 固定値はいずれも「& + プレフィックス長」なので一律に算出する
+        $offset = $prefix.Length + 1
+        $arg = if ($CmdLine.Length -gt $offset) { $CmdLine.Substring($offset) } else { '' }
+
+        # ハンドラ(scriptblock)の出力はすべてパイプライン出力として返るため、
+        # 途中に Write-Verbose 等の出力が混ざっていても最後の値だけを結果として扱う
+        $result = & $script:BuiltinHandlers[$prefix] $CmdLine $arg
+        return [string](@($result)[-1])
     }
 
     return 'NotHandled'

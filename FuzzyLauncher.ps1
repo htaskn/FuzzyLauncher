@@ -32,6 +32,7 @@
         UI\AddCommandForm.ps1        -> コマンド追加用GUIフォーム
         UI\TrayIconManager.ps1       -> タスクトレイアイコン
         Utils\StringHelper.ps1       -> 文字列操作のユーティリティ
+        Utils\ProcessHelper.ps1      -> 外部プロセス起動系の共通処理（notepad起動など）
         Utils\IconLoader.ps1         -> アプリアイコンの読み込み
         Utils\ResourceInitializer.ps1 -> commandsフォルダ/default.txtの初期化
         Utils\EnvironmentSync.ps1    -> レジストリから最新の環境変数(%VAR%)をプロセスに反映
@@ -80,6 +81,7 @@ $script:StartupCommand = '"{0}" -STA -NoProfile -ExecutionPolicy Bypass -WindowS
 . (Join-Path $PSScriptRoot 'Utils\EnvironmentSync.ps1')
 Sync-EnvironmentVariablesFromRegistry   # コマンドリストの %VAR% 展開用に最新の環境変数を反映（&reloadThisApp でも有効）
 . (Join-Path $PSScriptRoot 'Utils\StringHelper.ps1')
+. (Join-Path $PSScriptRoot 'Utils\ProcessHelper.ps1')
 . (Join-Path $PSScriptRoot 'Utils\IconLoader.ps1')
 . (Join-Path $PSScriptRoot 'Utils\ResourceInitializer.ps1')
 . (Join-Path $PSScriptRoot 'Core\AppSettings.ps1')
